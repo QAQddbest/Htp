@@ -1,0 +1,40 @@
+package dd.oliver.htp
+
+import io.netty.bootstrap.ServerBootstrap
+import io.netty.channel.nio.NioEventLoopGroup
+import io.netty.channel.socket.nio.NioServerSocketChannel
+import java.io.Closeable
+import java.net.InetSocketAddress
+
+class HtpServer(
+    var bossNum: Int = 1,
+    var workerNum: Int = 4,
+) : Closeable {
+
+    private val bossGroupDelegate = lazy {
+        NioEventLoopGroup(bossNum)
+    }
+    val bossGroup: NioEventLoopGroup by bossGroupDelegate
+    private val workerGroupDelegate = lazy {
+        NioEventLoopGroup(workerNum)
+    }
+    val workerGroup: NioEventLoopGroup by workerGroupDelegate
+
+    fun run(port: Int) {
+        val sbs = ServerBootstrap()
+        sbs.group(bossGroup, workerGroup)
+            .channel(NioServerSocketChannel::class.java)
+            .childHandler(HtpChannelInitializer())
+        val channelFuture = sbs.bind(InetSocketAddress(port)).sync()
+        println("Server start at ${port}")
+        channelFuture.channel().closeFuture().sync()
+    }
+
+    override fun close() {
+        if (bossGroupDelegate.isInitialized())
+            bossGroup.shutdownGracefully()
+        if (workerGroupDelegate.isInitialized())
+            workerGroup.shutdownGracefully()
+    }
+
+}
