@@ -3,12 +3,16 @@ package dd.oliver.htp
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.nio.NioServerSocketChannel
+import org.slf4j.LoggerFactory
 import java.io.Closeable
 import java.net.InetSocketAddress
 
+private val logger = LoggerFactory.getLogger(HtpServer::class.java)
+
 class HtpServer(
-    var bossNum: Int = 1,
-    var workerNum: Int = 4,
+    private var basePath: String,
+    private var bossNum: Int = 1,
+    private var workerNum: Int = 4,
 ) : Closeable {
 
     private val bossGroupDelegate = lazy {
@@ -24,9 +28,9 @@ class HtpServer(
         val sbs = ServerBootstrap()
         sbs.group(bossGroup, workerGroup)
             .channel(NioServerSocketChannel::class.java)
-            .childHandler(HtpChannelInitializer())
+            .childHandler(HtpChannelInitializer(basePath))
         val channelFuture = sbs.bind(InetSocketAddress(port)).sync()
-        println("Server start at ${port}")
+        logger.info("Server start at $port")
         channelFuture.channel().closeFuture().sync()
     }
 
