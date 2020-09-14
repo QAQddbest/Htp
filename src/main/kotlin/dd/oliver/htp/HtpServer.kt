@@ -12,7 +12,7 @@ private val logger = LoggerFactory.getLogger(HtpServer::class.java)
 class HtpServer(
     private var basePath: String,
     private var bossNum: Int = 1,
-    private var workerNum: Int = 4,
+    private var workerNum: Int = Runtime.getRuntime().availableProcessors() * 2,
 ) : Closeable {
 
     private val bossGroupDelegate = lazy {

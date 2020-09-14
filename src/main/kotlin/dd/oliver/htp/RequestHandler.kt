@@ -8,6 +8,7 @@ import io.netty.handler.codec.http.HttpRequest
 import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
 import org.slf4j.LoggerFactory
+import java.io.RandomAccessFile
 
 private val logger = LoggerFactory.getLogger(RequestHandler::class.java)
 
@@ -36,7 +37,20 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
 
     override fun channelRead0(ctx: ChannelHandlerContext, msg: HttpRequest) {
         val path = basePath + msg.uri()
-        println("$path wanted")
+        val file = RandomAccessFile(path, "r")
+        DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.PARTIAL_CONTENT)
+        if (msg.headers().contains("Range")) { // Multiple threads download
+            println("Find Range: ${msg.headers().get("Range")}")
+            val range = msg.headers().get("Range").substring(6) // remove 'bytes='
+            if (range.indexOf("-") == range.length - 1) { // example: 0-
+
+            } else { // example: 0-100
+
+            }
+        } else { // Single thread download
+
+        }
+
     }
 
     private fun sendError(ctx: ChannelHandlerContext, msg: String, status: HttpResponseStatus) {
