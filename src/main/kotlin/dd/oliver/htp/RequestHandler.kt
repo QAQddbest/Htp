@@ -8,6 +8,7 @@ import io.netty.handler.codec.http.HttpRequest
 import io.netty.handler.codec.http.HttpResponseStatus
 import io.netty.handler.codec.http.HttpVersion
 import org.slf4j.LoggerFactory
+import java.io.File
 import java.io.RandomAccessFile
 
 private val logger = LoggerFactory.getLogger(RequestHandler::class.java)
@@ -24,11 +25,11 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
     }
 
     override fun channelActive(ctx: ChannelHandlerContext) {
-        logger.debug("A client connected")
+        logger.trace("A client connected")
     }
 
     override fun channelInactive(ctx: ChannelHandlerContext) {
-        logger.debug("A client disconnected")
+        logger.trace("A client disconnected")
     }
 
     override fun channelReadComplete(ctx: ChannelHandlerContext) {
@@ -37,20 +38,46 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
 
     override fun channelRead0(ctx: ChannelHandlerContext, msg: HttpRequest) {
         val path = basePath + msg.uri()
-        val file = RandomAccessFile(path, "r")
-        DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.PARTIAL_CONTENT)
+        logger.debug("Fetching $path")
+        val file = File(path)
+        val rfile = RandomAccessFile(file, "r")
         if (msg.headers().contains("Range")) { // Multiple threads download
-            println("Find Range: ${msg.headers().get("Range")}")
+            logger.debug("Find 'Range' in HttpRequest: ${msg.headers().get("Range")}")
             val range = msg.headers().get("Range").substring(6) // remove 'bytes='
+            // Line
+            val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.PARTIAL_CONTENT)
+            val bIdx = range.substring(0, range.indexOf("-")).toLong()
+            var eIdx = 0L
             if (range.indexOf("-") == range.length - 1) { // example: 0-
-
+                // TODO: Judge bIdx > file.size?
+                eIdx = rfile.length() - 1
             } else { // example: 0-100
-
+                eIdx = range.substring(range.indexOf("-") + 1, range.length).toLong()
             }
+            logger.debug("bIdx = ${bIdx}; eIdx = ${eIdx}")
+            // Headers
+            response.headers().set("Accept-Ranges", "bytes")
+            response.headers().set("Content-Range", "bytes ${bIdx}-${eIdx}/${rfile.length()}")
+            response.headers().set("Content-Disposition", "attachment; filename=\"${file.name}\"")
+            response.headers().set("Content-Type", "application/octet-stream")
+            response.headers().set("Content-Length", "${eIdx - bIdx + 1}")
+            // Content
+            response.content().writeBytes(rfile.channel, bIdx, (eIdx - bIdx + 1).toInt())
+            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
         } else { // Single thread download
-
+            logger.debug("No 'Range' in HttpRequest")
+            // Line
+            val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
+            // Headers
+            response.headers().set("Accept-Ranges", "bytes")
+            response.headers().set("Content-Range", "bytes ${0}-${rfile.length() - 1}/${rfile.length()}")
+            response.headers().set("Content-Disposition", "attachment; filename=\"${file.name}\"")
+            response.headers().set("Content-Type", "application/octet-stream")
+            response.headers().set("Content-Length", "${rfile.length()}")
+            // Content
+            response.content().writeBytes(rfile.channel, 0L, rfile.length().toInt())
+            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
         }
-
     }
 
     private fun sendError(ctx: ChannelHandlerContext, msg: String, status: HttpResponseStatus) {
