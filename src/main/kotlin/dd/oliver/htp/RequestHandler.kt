@@ -10,7 +10,7 @@ import java.io.RandomAccessFile
 
 private val logger = LoggerFactory.getLogger(RequestHandler::class.java)
 
-class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpRequest>() {
+class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler<HttpRequest>() {
     override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
         logger.error("Server encounter error:")
         cause.printStackTrace()
@@ -97,13 +97,15 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     <dl>
                 """.trimIndent()
                     )
-                    if (file.list().size == 0) {
-                        builder.append("<h1>Empty here</h1>")
-                    } else {
-                        file.list().forEach {
-                            builder.append("<dt><a href=\"${msg.uri() + it + "/"}\">${it}</a></dt>")
+                    file.list()?.apply {
+                        if (this.isEmpty()) {
+                            builder.append("<h1>Empty here</h1>")
+                        } else {
+                            this.forEach {
+                                builder.append("<dt><a href=\"${msg.uri() + it + "/"}\">${it}</a></dt>")
+                            }
                         }
-                    }
+                    } ?: builder.append("<h1>Empty here</h1>")
                     builder.append(
                         """
                     </dl>

@@ -18,11 +18,11 @@ class HtpServer(
     private val bossGroupDelegate = lazy {
         NioEventLoopGroup(bossNum)
     }
-    val bossGroup: NioEventLoopGroup by bossGroupDelegate
+    private val bossGroup: NioEventLoopGroup by bossGroupDelegate
     private val workerGroupDelegate = lazy {
         NioEventLoopGroup(workerNum)
     }
-    val workerGroup: NioEventLoopGroup by workerGroupDelegate
+    private val workerGroup: NioEventLoopGroup by workerGroupDelegate
 
     fun run(port: Int) {
         val sbs = ServerBootstrap()
