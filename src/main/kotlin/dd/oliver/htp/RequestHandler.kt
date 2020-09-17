@@ -102,8 +102,12 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     <dl>
                 """.trimIndent()
                 )
-                file.list().forEach {
-                    builder.append("<dt><a href=\"${msg.uri() + it + "/"}\">${it}</a></dt>")
+                if (file.list().size == 0) {
+                    builder.append("<h1>Empty here</h1>")
+                } else {
+                    file.list().forEach {
+                        builder.append("<dt><a href=\"${msg.uri() + it + "/"}\">${it}</a></dt>")
+                    }
                 }
                 builder.append(
                     """
@@ -120,7 +124,29 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 response.content().writeBytes(builder.toString().toByteArray())
                 ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
             } else {
-                // todo: return 404
+                val builder = StringBuilder()
+                builder.append(
+                    """
+                    <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Bad request</title>
+                </head>
+                <body>
+                    <h1>404</h1>
+                    Path error...
+                </body>
+                </html>
+                """.trimIndent()
+                )
+                // Line
+                val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST)
+                // Headers
+                response.headers().set("Content-Type", "text/html; charset=utf-8")
+                // Content
+                response.content().writeBytes(builder.toString().toByteArray())
+                ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
             }
         }
     }
