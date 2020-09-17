@@ -11,6 +11,6 @@ class HtpChannelInitializer(val basePath: String) : ChannelInitializer<SocketCha
         ch.pipeline().addLast("HttpCodec", HttpServerCodec())
         ch.pipeline().addLast("HttpAggregator", HttpObjectAggregator(65536))
         ch.pipeline().addLast("HttpChunked", ChunkedWriteHandler())
-        ch.pipeline().addLast("RequestHandle", RequestHandler(basePath))
+        ch.pipeline().addLast("RequestHandler", RequestHandler(basePath))
     }
 }

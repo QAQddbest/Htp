@@ -1,15 +1,12 @@
 package dd.oliver.htp
 
-import io.netty.channel.ChannelFutureListener
-import io.netty.channel.ChannelHandlerContext
-import io.netty.channel.SimpleChannelInboundHandler
-import io.netty.handler.codec.http.DefaultFullHttpResponse
-import io.netty.handler.codec.http.HttpRequest
-import io.netty.handler.codec.http.HttpResponseStatus
-import io.netty.handler.codec.http.HttpVersion
+import io.netty.channel.*
+import io.netty.handler.codec.http.*
+import io.netty.handler.stream.ChunkedFile
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.RandomAccessFile
+
 
 private val logger = LoggerFactory.getLogger(RequestHandler::class.java)
 
@@ -18,7 +15,7 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
         logger.error("Server encounter error:")
         cause.printStackTrace()
         sendError(
-            ctx, "Something bad happen to the server",
+            ctx,
             HttpResponseStatus.INTERNAL_SERVER_ERROR
         )
         ctx.channel().close()
@@ -37,22 +34,19 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
     }
 
     override fun channelRead0(ctx: ChannelHandlerContext, msg: HttpRequest) {
+        logger.info("request: ${msg.uri()}")
         if (msg.uri() == "/favicon.ico") {
             // Line
             val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
             // Headers
-            response.headers().set("Content-Type", "image/vnd.microsoft.icon")
-            if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive") {
-                response.headers().set("Connection", "Keep-Alive")
-            }
+            response.headers().set(HttpHeaderNames.CONTENT_TYPE, "image/vnd.microsoft.icon")
+            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
             // Content
             response.content().writeBytes(RequestHandler::class.java.getResourceAsStream("/img/file.png").readBytes())
             val future = ctx.writeAndFlush(response)
-            if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive")
-                future.addListener(ChannelFutureListener.CLOSE)
+            future.addListener(ChannelFutureListener.CLOSE)
         } else {
             val path = basePath + msg.uri() // msg.uri() example: / or /a/b or /a/b/c.txt
-            logger.info("Request $path")
             val file = File(path)
             if (file.isFile) {
                 val rfile = RandomAccessFile(file, "r")
@@ -60,7 +54,7 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     logger.debug("Find 'Range' in HttpRequest: ${msg.headers().get("Range")}")
                     val range = msg.headers().get("Range").substring(6) // remove 'bytes='
                     // Line
-                    val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.PARTIAL_CONTENT)
+                    val response = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.PARTIAL_CONTENT)
                     val bIdx = range.substring(0, range.indexOf("-")).toLong()
                     var eIdx = 0L
                     eIdx = if (range.indexOf("-") == range.length - 1) { // example: 0-
@@ -71,32 +65,92 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     }
                     logger.debug("bIdx = ${bIdx}; eIdx = ${eIdx}")
                     // Headers
-                    response.headers().set("Accept-Ranges", "bytes")
-                    response.headers().set("Content-Range", "bytes ${bIdx}-${eIdx}/${rfile.length()}")
-                    response.headers().set("Content-Disposition", "attachment; filename=\"${file.name}\"")
-                    response.headers().set("Content-Type", "application/octet-stream")
-                    response.headers().set("Content-Length", "${eIdx - bIdx + 1}")
+                    response.headers().set(HttpHeaderNames.ACCEPT_RANGES, HttpHeaderValues.BYTES)
+                    response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"${file.name}\"")
+                    response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_OCTET_STREAM)
+                    response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
+                    response.headers().set(HttpHeaderNames.CONTENT_RANGE, "bytes ${bIdx}-${eIdx}/${rfile.length()}")
+                    if (!HttpUtil.isKeepAlive(msg)) {
+                        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
+                    } else {
+                        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+                    }
                     // Content
-                    response.content().writeBytes(rfile.channel, bIdx, (eIdx - bIdx + 1).toInt())
-                    ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
+                    ctx.channel().write(response)
+                    val sendFileFuture = ctx.write(
+                        HttpChunkedInput(ChunkedFile(rfile, bIdx, eIdx - bIdx + 1, 8192)),
+                        ctx.newProgressivePromise()
+                    )
+                    sendFileFuture.addListener(object : ChannelProgressiveFutureListener {
+                        override fun operationProgressed(
+                            future: ChannelProgressiveFuture,
+                            progress: Long,
+                            total: Long
+                        ) {
+                            if (total < 0) { // total unknown
+                                logger.trace(future.channel().toString() + " Transfer progress: " + progress)
+                            } else {
+                                logger.trace(
+                                    future.channel().toString() + " Transfer progress: " + progress + " / " + total
+                                )
+                            }
+                        }
+
+                        override fun operationComplete(future: ChannelProgressiveFuture) {
+                            logger.trace(future.channel().toString() + " Transfer complete.")
+                        }
+                    })
+                    if (!HttpUtil.isKeepAlive(msg)) {
+                        sendFileFuture.addListener(ChannelFutureListener.CLOSE)
+                    }
                 } else { // Single thread download
                     logger.debug("No 'Range' in HttpRequest")
                     // Line
-                    val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
+                    val response = DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
                     // Headers
-                    response.headers().set("Accept-Ranges", "bytes")
-                    response.headers().set("Content-Range", "bytes ${0}-${rfile.length() - 1}/${rfile.length()}")
-                    response.headers().set("Content-Disposition", "attachment; filename=\"${file.name}\"")
-                    response.headers().set("Content-Type", "application/octet-stream")
-                    response.headers().set("Content-Length", "${rfile.length()}")
+                    response.headers().set(HttpHeaderNames.ACCEPT_RANGES, HttpHeaderValues.BYTES)
+                    response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"${file.name}\"")
+                    response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_OCTET_STREAM)
+                    response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${rfile.length()}")
+                    if (!HttpUtil.isKeepAlive(msg)) {
+                        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
+                    } else {
+                        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+                    }
                     // Content
-                    response.content().writeBytes(rfile.channel, 0L, rfile.length().toInt())
-                    ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
+                    ctx.write(response)
+                    val sendFileFuture = ctx.write(
+                        HttpChunkedInput(ChunkedFile(rfile, 0, rfile.length(), 8192)),
+                        ctx.newProgressivePromise()
+                    )
+                    sendFileFuture.addListener(object : ChannelProgressiveFutureListener {
+                        override fun operationProgressed(
+                            future: ChannelProgressiveFuture,
+                            progress: Long,
+                            total: Long
+                        ) {
+                            if (total < 0) { // total unknown
+                                logger.trace(future.channel().toString() + " Transfer progress: " + progress)
+                            } else {
+                                logger.trace(
+                                    future.channel().toString() + " Transfer progress: " + progress + " / " + total
+                                )
+                            }
+                        }
+
+                        override fun operationComplete(future: ChannelProgressiveFuture) {
+                            logger.trace(future.channel().toString() + " Transfer complete.")
+                        }
+                    })
+                    if (!HttpUtil.isKeepAlive(msg)) {
+                        sendFileFuture.addListener(ChannelFutureListener.CLOSE)
+                    }
                 }
             } else if (file.isDirectory) {
-                val builder = StringBuilder()
-                builder.append(
-                    """
+                sendHtml(ctx, HttpResponseStatus.OK) {
+                    val builder = StringBuilder()
+                    builder.append(
+                        """
                 <!DOCTYPE html>
                 <html lang="en">
                 <head>
@@ -106,37 +160,33 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 <body>
                     <dl>
                 """.trimIndent()
-                )
-                if (file.list().size == 0) {
-                    builder.append("<h1>Empty here</h1>")
-                } else {
-                    file.list().forEach {
-                        builder.append("<dt><a href=\"${msg.uri() + it + "/"}\">${it}</a></dt>")
+                    )
+                    if (file.list().size == 0) {
+                        builder.append("<h1>Empty here</h1>")
+                    } else {
+                        file.list().forEach {
+                            builder.append("<dt><a href=\"${msg.uri() + it + "/"}\">${it}</a></dt>")
+                        }
                     }
-                }
-                builder.append(
-                    """
+                    builder.append(
+                        """
                     </dl>
                 </body>
                 </html>
             """.trimIndent()
-                )
-                // Line
-                val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
-                // Headers
-                response.headers().set("Content-Type", "text/html; charset=utf-8")
-                // Content
-                response.content().writeBytes(builder.toString().toByteArray())
-                ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
+                    )
+                    builder.toString()
+                }
             } else {
-                val builder = StringBuilder()
-                builder.append(
-                    """
-                    <!DOCTYPE html>
+                sendHtml(ctx, HttpResponseStatus.BAD_GATEWAY) {
+                    val builder = StringBuilder()
+                    builder.append(
+                        """
+                <!DOCTYPE html>
                 <html lang="en">
                 <head>
-                    <meta charset="UTF-8">
-                    <title>Bad request</title>
+                <meta charset="UTF-8">
+                <title>Bad request</title>
                 </head>
                 <body>
                     <h1>404</h1>
@@ -144,30 +194,29 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 </body>
                 </html>
                 """.trimIndent()
-                )
-                // Line
-                val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST)
-                // Headers
-                response.headers().set("Content-Type", "text/html; charset=utf-8")
-                if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive") {
-                    response.headers().set("Connection", "Keep-Alive")
+                    )
+                    builder.toString()
                 }
-                // Content
-                response.content().writeBytes(builder.toString().toByteArray())
-                val future = ctx.writeAndFlush(response)
-                if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive")
-                    future.addListener(ChannelFutureListener.CLOSE)
             }
         }
     }
 
-    private fun sendError(ctx: ChannelHandlerContext, msg: String, status: HttpResponseStatus) {
-        val bufAllocator = ctx.alloc()
+    private fun sendHtml(ctx: ChannelHandlerContext, status: HttpResponseStatus, function: () -> String) {
+        val result = function()
+        // Line
         val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status)
-        val buffer = bufAllocator.buffer(msg.length)
-        buffer.writeBytes(msg.toByteArray())
-        response.content().writeBytes(buffer)
-        buffer.release()
+        // Headers
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_HTML)
+        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
+        // Content
+        response.content().writeBytes(result.toByteArray())
+        val future = ctx.writeAndFlush(response)
+        future.addListener(ChannelFutureListener.CLOSE)
+    }
+
+    private fun sendError(ctx: ChannelHandlerContext, status: HttpResponseStatus) {
+        val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status)
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain; charset=UTF-8")
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
     }
 
