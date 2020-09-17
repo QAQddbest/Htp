@@ -66,7 +66,6 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     }
                     sendFile(
                         ctx,
-                        HttpUtil.isKeepAlive(msg),
                         HttpResponseStatus.PARTIAL_CONTENT,
                         file,
                         accessFile,
@@ -76,12 +75,11 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 } else { // Single thread download
                     sendFile(
                         ctx,
-                        HttpUtil.isKeepAlive(msg),
                         HttpResponseStatus.OK,
                         file,
                         accessFile,
                         0,
-                        accessFile.length(),
+                        accessFile.length() - 1,
                     )
                 }
             } else if (file.isDirectory) {
@@ -141,7 +139,6 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
 
     private fun sendFile(
         ctx: ChannelHandlerContext,
-        isKeepActive: Boolean,
         status: HttpResponseStatus,
         file: File,
         accessFile: RandomAccessFile,
@@ -156,11 +153,7 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_OCTET_STREAM)
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
         response.headers().set(HttpHeaderNames.CONTENT_RANGE, "bytes ${bIdx}-${eIdx}/${accessFile.length()}")
-        if (!isKeepActive) {
-            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
-        } else {
-            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
-        }
+        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
         // Content
         ctx.channel().write(response)
         val sendFileFuture = ctx.write(
@@ -187,9 +180,7 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 accessFile.close()
             }
         })
-        if (!isKeepActive) {
-            sendFileFuture.addListener(ChannelFutureListener.CLOSE)
-        }
+        sendFileFuture.addListener(ChannelFutureListener.CLOSE)
     }
 
     private fun sendHtml(ctx: ChannelHandlerContext, status: HttpResponseStatus, function: () -> String) {
