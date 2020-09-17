@@ -42,12 +42,17 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
             val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
             // Headers
             response.headers().set("Content-Type", "image/vnd.microsoft.icon")
+            if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive") {
+                response.headers().set("Connection", "Keep-Alive")
+            }
             // Content
             response.content().writeBytes(RequestHandler::class.java.getResourceAsStream("/img/file.png").readBytes())
-            ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
+            val future = ctx.writeAndFlush(response)
+            if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive")
+                future.addListener(ChannelFutureListener.CLOSE)
         } else {
             val path = basePath + msg.uri() // msg.uri() example: / or /a/b or /a/b/c.txt
-            logger.debug("Fetching $path")
+            logger.info("Request $path")
             val file = File(path)
             if (file.isFile) {
                 val rfile = RandomAccessFile(file, "r")
@@ -144,9 +149,14 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST)
                 // Headers
                 response.headers().set("Content-Type", "text/html; charset=utf-8")
+                if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive") {
+                    response.headers().set("Connection", "Keep-Alive")
+                }
                 // Content
                 response.content().writeBytes(builder.toString().toByteArray())
-                ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
+                val future = ctx.writeAndFlush(response)
+                if (msg.headers().contains("Connection") && msg.headers().get("Connection") == "Keep-Alive")
+                    future.addListener(ChannelFutureListener.CLOSE)
             }
         }
     }
