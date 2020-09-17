@@ -58,11 +58,11 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.PARTIAL_CONTENT)
                     val bIdx = range.substring(0, range.indexOf("-")).toLong()
                     var eIdx = 0L
-                    if (range.indexOf("-") == range.length - 1) { // example: 0-
+                    eIdx = if (range.indexOf("-") == range.length - 1) { // example: 0-
                         // TODO: Judge bIdx > file.size?
-                        eIdx = rfile.length() - 1
+                        rfile.length() - 1
                     } else { // example: 0-100
-                        eIdx = range.substring(range.indexOf("-") + 1, range.length).toLong()
+                        range.substring(range.indexOf("-") + 1, range.length).toLong()
                     }
                     logger.debug("bIdx = ${bIdx}; eIdx = ${eIdx}")
                     // Headers
@@ -88,7 +88,7 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                     response.content().writeBytes(rfile.channel, 0L, rfile.length().toInt())
                     ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
                 }
-            } else {
+            } else if (file.isDirectory) {
                 val builder = StringBuilder()
                 builder.append(
                     """
@@ -119,6 +119,8 @@ class RequestHandler(val basePath: String) : SimpleChannelInboundHandler<HttpReq
                 // Content
                 response.content().writeBytes(builder.toString().toByteArray())
                 ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
+            } else {
+                // todo: return 404
             }
         }
     }
