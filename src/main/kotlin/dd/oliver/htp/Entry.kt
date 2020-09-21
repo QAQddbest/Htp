@@ -26,7 +26,7 @@ class Htp : CliktCommand() {
         val canPath = file.canonicalPath.replace("\\", "/")
         logger.info("Pick up path $canPath")
         val addr = InetAddress.getLocalHost()
-        logger.info("Now browse http://${addr.hostAddress}:${port}")
+        logger.info("Now browse http://${addr.hostAddress}:${port} to use service")
         val htpServer = HtpServer(canPath)
         htpServer.run(port)
     }

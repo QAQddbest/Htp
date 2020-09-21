@@ -5,6 +5,7 @@ import io.netty.handler.codec.http.*
 import io.netty.handler.stream.ChunkedFile
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 
 
@@ -12,12 +13,14 @@ private val logger = LoggerFactory.getLogger(RequestHandler::class.java)
 
 class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler<HttpRequest>() {
     override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
-        logger.error("Server encounter error:")
-        cause.printStackTrace()
-        sendError(
-            ctx,
-            HttpResponseStatus.INTERNAL_SERVER_ERROR
-        )
+        if (cause !is IOException) {
+            logger.error("Server encounter error:")
+            cause.printStackTrace()
+            sendError(
+                ctx,
+                HttpResponseStatus.INTERNAL_SERVER_ERROR
+            )
+        }
         ctx.channel().close()
     }
 
@@ -167,7 +170,9 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
         response.headers().set(HttpHeaderNames.ACCEPT_RANGES, HttpHeaderValues.BYTES)
         response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"${file.name}\"")
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_OCTET_STREAM)
-//        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
+        if ((bIdx == 0L) and (eIdx == accessFile.length() - 1)) { // Whole file
+            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
+        }
         response.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED)
         response.headers().set(HttpHeaderNames.CONTENT_RANGE, "bytes ${bIdx}-${eIdx}/${accessFile.length()}")
         if (!isKeepAlive) {
