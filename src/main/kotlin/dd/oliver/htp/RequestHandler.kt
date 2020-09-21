@@ -36,15 +36,26 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
     override fun channelRead0(ctx: ChannelHandlerContext, msg: HttpRequest) {
         logger.info("request: ${msg.uri()}")
         if (msg.uri() == "/favicon.ico") {
-            // Line
-            val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
-            // Headers
-            response.headers().set(HttpHeaderNames.CONTENT_TYPE, "image/vnd.microsoft.icon")
-            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
-            // Content
-            response.content().writeBytes(RequestHandler::class.java.getResourceAsStream("/img/file.png").readBytes())
-            val future = ctx.writeAndFlush(response)
-            future.addListener(ChannelFutureListener.CLOSE)
+            val stream = RequestHandler::class.java.getResourceAsStream("/img/file.png")
+            stream.use {
+                // Line
+                val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK)
+                // Headers
+                response.headers().set(HttpHeaderNames.CONTENT_TYPE, "image/vnd.microsoft.icon")
+                response.headers().set(HttpHeaderNames.CONTENT_LENGTH, it.available())
+                if (!HttpUtil.isKeepAlive(msg)) {
+                    response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
+                } else {
+                    response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
+                }
+                // Content
+                response.content().writeBytes(it.readBytes())
+                val future = ctx.writeAndFlush(response)
+
+                if (!HttpUtil.isKeepAlive(msg)) {
+                    future.addListener(ChannelFutureListener.CLOSE)
+                }
+            }
         } else {
             val path = basePath + msg.uri() // msg.uri() example: / or /a/b or /a/b/c.txt
             val file = File(path)
@@ -66,6 +77,7 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
                     }
                     sendFile(
                         ctx,
+                        HttpUtil.isKeepAlive(msg),
                         HttpResponseStatus.PARTIAL_CONTENT,
                         file,
                         accessFile,
@@ -75,6 +87,7 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
                 } else { // Single thread download
                     sendFile(
                         ctx,
+                        HttpUtil.isKeepAlive(msg),
                         HttpResponseStatus.OK,
                         file,
                         accessFile,
@@ -83,7 +96,7 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
                     )
                 }
             } else if (file.isDirectory) {
-                sendHtml(ctx, HttpResponseStatus.OK) {
+                sendHtml(ctx, HttpUtil.isKeepAlive(msg), HttpResponseStatus.OK) {
                     val builder = StringBuilder()
                     builder.append(
                         """
@@ -116,7 +129,7 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
                     builder.toString()
                 }
             } else {
-                sendHtml(ctx, HttpResponseStatus.BAD_GATEWAY) {
+                sendHtml(ctx, HttpUtil.isKeepAlive(msg), HttpResponseStatus.BAD_GATEWAY) {
                     val builder = StringBuilder()
                     builder.append(
                         """
@@ -141,6 +154,7 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
 
     private fun sendFile(
         ctx: ChannelHandlerContext,
+        isKeepAlive: Boolean,
         status: HttpResponseStatus,
         file: File,
         accessFile: RandomAccessFile,
@@ -155,7 +169,11 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_OCTET_STREAM)
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
         response.headers().set(HttpHeaderNames.CONTENT_RANGE, "bytes ${bIdx}-${eIdx}/${accessFile.length()}")
+//        if (!isKeepAlive) {
         response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
+//        } else {
+//            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
+//        }
         // Content
         ctx.channel().write(response)
         val sendFileFuture = ctx.write(
@@ -183,24 +201,38 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
             }
         })
         sendFileFuture.addListener(ChannelFutureListener.CLOSE)
+
     }
 
-    private fun sendHtml(ctx: ChannelHandlerContext, status: HttpResponseStatus, function: () -> String) {
+    private inline fun sendHtml(
+        ctx: ChannelHandlerContext,
+        isKeepAlive: Boolean,
+        status: HttpResponseStatus,
+        function: () -> String
+    ) {
         val result = function()
         // Line
         val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status)
         // Headers
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.TEXT_HTML)
-        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
+        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, result.length)
+        if (!isKeepAlive) {
+            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
+        } else {
+            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
+        }
         // Content
         response.content().writeBytes(result.toByteArray())
         val future = ctx.writeAndFlush(response)
-        future.addListener(ChannelFutureListener.CLOSE)
+        if (!isKeepAlive) {
+            future.addListener(ChannelFutureListener.CLOSE)
+        }
     }
 
     private fun sendError(ctx: ChannelHandlerContext, status: HttpResponseStatus) {
         val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status)
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain; charset=UTF-8")
+        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE)
     }
 

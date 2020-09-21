@@ -1,29 +1,28 @@
 package dd.oliver.htp
 
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.options.versionOption
+import com.github.ajalt.clikt.parameters.types.path
 import org.slf4j.LoggerFactory
-import java.io.File
 
 private val logger = LoggerFactory.getLogger("Main")
 
-fun main(args: Array<String>) {
-
-    val path: String
-    if (args.isEmpty()) {
-        logger.error("Path is needed")
-        return
-    } else {
-        val file = File(args[0])
-        if (!file.exists()) {
-            logger.error("Path is not exists")
-            return
-        }
-        if (!file.isDirectory) {
-            logger.error("Path is not directory")
-            return
-        }
-        path = file.canonicalPath.replace("\\", "/")
-        logger.info("Pick up path $path")
+class Htp : CliktCommand() {
+    init {
+        versionOption("1.0.0")
     }
-    val htpServer = HtpServer(path)
-    htpServer.run(2333)
+
+    private val path by argument(help = "Path to display").path(mustExist = true, canBeFile = false)
+
+    override fun run() {
+        val file = path.toFile()
+        val canPath = file.canonicalPath.replace("\\", "/")
+        logger.info("Pick up path $canPath")
+
+        val htpServer = HtpServer(canPath)
+        htpServer.run(2333)
+    }
 }
+
+fun main(args: Array<String>) = Htp().main(args)

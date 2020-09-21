@@ -32,6 +32,7 @@ class HtpServer(
         val channelFuture = sbs.bind(InetSocketAddress(port)).sync()
         logger.info("Server start at $port")
         channelFuture.channel().closeFuture().sync()
+
     }
 
     override fun close() {
