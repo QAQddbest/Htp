@@ -51,8 +51,8 @@ Arguments:
   PATH  Path to display
 ```
 
-As you can see, `PATH` is required and `port` is alternative.
+As you can see, `PATH` is required and `port` is alternative. And the port's default value is 2333.
 
 ## TODO
 
-Not yet, at last before I master how to upload file. XD
+Not yet, at least before I master how to upload file. XD
