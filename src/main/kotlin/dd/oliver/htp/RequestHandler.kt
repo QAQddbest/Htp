@@ -167,19 +167,21 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
         response.headers().set(HttpHeaderNames.ACCEPT_RANGES, HttpHeaderValues.BYTES)
         response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"${file.name}\"")
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_OCTET_STREAM)
-        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
+//        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, "${eIdx - bIdx + 1}")
+        response.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED)
         response.headers().set(HttpHeaderNames.CONTENT_RANGE, "bytes ${bIdx}-${eIdx}/${accessFile.length()}")
-//        if (!isKeepAlive) {
-        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
-//        } else {
-//            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
-//        }
+        if (!isKeepAlive) {
+            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
+        } else {
+            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE)
+        }
         // Content
         ctx.channel().write(response)
         val sendFileFuture = ctx.write(
             HttpChunkedInput(ChunkedFile(accessFile, bIdx, eIdx - bIdx + 1, 8192)),
             ctx.newProgressivePromise()
         )
+        val lastHttpFuture = ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT)
         sendFileFuture.addListener(object : ChannelProgressiveFutureListener {
             override fun operationProgressed(
                 future: ChannelProgressiveFuture,
@@ -200,8 +202,9 @@ class RequestHandler(private val basePath: String) : SimpleChannelInboundHandler
                 accessFile.close()
             }
         })
-        sendFileFuture.addListener(ChannelFutureListener.CLOSE)
-
+        if (!isKeepAlive) {
+            lastHttpFuture.addListener(ChannelFutureListener.CLOSE)
+        }
     }
 
     private inline fun sendHtml(
