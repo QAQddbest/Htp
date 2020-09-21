@@ -15,7 +15,11 @@ private val logger = LoggerFactory.getLogger("Main")
 
 class Htp : CliktCommand() {
     init {
-        versionOption("1.0.1")
+        versionOption(
+            "1.0.2",
+            "Show this message and exit",
+            setOf("--version", "-v")
+        )
     }
 
     private val port by option("-p", "--port", help = "Port to deploy").int().default(2333)
